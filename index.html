@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Расклад Таро</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 16px;
+      background: #111;
+      color: #fff;
+    }
+    h1 {
+      font-size: 20px;
+      margin-bottom: 8px;
+    }
+    p {
+      font-size: 14px;
+      opacity: 0.9;
+      margin-top: 4px;
+      margin-bottom: 8px;
+    }
+    .counter {
+      margin-top: 6px;
+      font-size: 13px;
+      opacity: 0.8;
+    }
+    .cards {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+      margin-bottom: 60px;
+    }
+    .card {
+      flex: 1 1 calc(33% - 8px);
+      min-width: 90px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      padding: 10px 6px;
+      text-align: center;
+      font-size: 12px;
+      cursor: pointer;
+      background: rgba(0, 0, 0, 0.2);
+      transition:
+        transform 0.1s ease,
+        box-shadow 0.1s ease,
+        background 0.1s ease,
+        border 0.1s ease,
+        opacity 0.1s ease;
+      user-select: none;
+    }
+    .card.selected {
+      background: rgba(255, 255, 255, 0.15);
+      box-shadow: 0 0 8px rgba(255, 255, 255, 0.4);
+      border-color: rgba(255, 255, 255, 0.7);
+      transform: translateY(-2px);
+    }
+    .card.disabled {
+      opacity: 0.4;
+    }
+    .hint {
+      font-size: 12px;
+      opacity: 0.8;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Выбери 3 карты</h1>
+  <p>Интуитивно нажми на три карты из семи. Я отправлю их в бота, и он сделает расклад.</p>
+
+  <div class="counter">
+    Выбрано: <span id="count">0</span> / 3
+  </div>
+  <div class="hint">
+    Повторно нажми на карту, чтобы её снять.
+  </div>
+
+  <div id="cards" class="cards"></div>
+
+  <script>
+    const tg = window.Telegram.WebApp;
+
+    // Полная колода Таро (78 карт)
+    const deck = [
+      // Старшие арканы
+      "Шут","Маг","Жрица","Императрица","Император","Иерофант","Влюблённые","Колесница",
+      "Справедливость","Отшельник","Колесо Фортуны","Сила","Повешенный","Смерть","Умеренность",
+      "Дьявол","Башня","Звезда","Луна","Солнце","Суд","Мир",
+
+      // Жезлы
+      "Туз Жезлов","2 Жезлов","3 Жезлов","4 Жезлов","5 Жезлов","6 Жезлов","7 Жезлов","8 Жезлов",
+      "9 Жезлов","10 Жезлов","Паж Жезлов","Рыцарь Жезлов","Королева Жезлов","Король Жезлов",
+
+      // Кубки
+      "Туз Кубков","2 Кубков","3 Кубков","4 Кубков","5 Кубков","6 Кубков","7 Кубков","8 Кубков",
+      "9 Кубков","10 Кубков","Паж Кубков","Рыцарь Кубков","Королева Кубков","Король Кубков",
+
+      // Мечи
+      "Туз Мечей","2 Мечей","3 Мечей","4 Мечей","5 Мечей","6 Мечей","7 Мечей","8 Мечей",
+      "9 Мечей","10 Мечей","Паж Мечей","Рыцарь Мечей","Королева Мечей","Король Мечей",
+
+      // Пентакли
+      "Туз Пентаклей","2 Пентаклей","3 Пентаклей","4 Пентаклей","5 Пентаклей","6 Пентаклей",
+      "7 Пентаклей","8 Пентаклей","9 Пентаклей","10 Пентаклей","Паж Пентаклей",
+      "Рыцарь Пентаклей","Королева Пентаклей","Король Пентаклей"
+    ];
+
+    // Перемешивание колоды
+    function shuffle(array) {
+      return array
+        .map(value => ({ value, sort: Math.random() }))
+        .sort((a, b) => a.sort - b.sort)
+        .map(({ value }) => value);
+    }
+
+    // 50% шанс сделать карту перевёрнутой
+    function maybeReversed(card) {
+      return Math.random() < 0.5 ? card : card + " (перевёрнутая)";
+    }
+
+    const shuffled = shuffle(deck);
+    const selected = new Set();
+    const cardsContainer = document.getElementById("cards");
+    const counterSpan = document.getElementById("count");
+
+    function updateCounter() {
+      counterSpan.textContent = selected.size.toString();
+      if (selected.size === 3) {
+        tg.MainButton.setText("Отправить карты в бота");
+        tg.MainButton.show();
+      } else {
+        tg.MainButton.hide();
+      }
+
+      // Когда выбрано 3, остальные делаем визуально «приглушёнными»
+      const cardDivs = cardsContainer.querySelectorAll(".card");
+      cardDivs.forEach(div => {
+        const name = div.dataset.name;
+        if (selected.size >= 3 && !selected.has(name)) {
+          div.classList.add("disabled");
+        } else {
+          div.classList.remove("disabled");
+        }
+      });
+    }
+
+    function renderCards() {
+      // Показываем 7 случайных карт
+      shuffled.slice(0, 7).forEach(cardName => {
+        const div = document.createElement("div");
+        div.className = "card";
+        div.textContent = cardName;
+        div.dataset.name = cardName;
+
+        div.onclick = () => {
+          if (selected.has(cardName)) {
+            selected.delete(cardName);
+            div.classList.remove("selected");
+          } else {
+            if (selected.size >= 3) return;
+            selected.add(cardName);
+            div.classList.add("selected");
+          }
+          updateCounter();
+        };
+
+        cardsContainer.appendChild(div);
+      });
+    }
+
+    tg.ready();
+    tg.MainButton.hide();
+
+    tg.MainButton.onClick(() => {
+      if (selected.size !== 3) return;
+
+      const finalCards = Array.from(selected).map(maybeReversed);
+
+      tg.sendData(JSON.stringify({ cards: finalCards }));
+      tg.close();
+    });
+
+    renderCards();
+    updateCounter();
+  </script>
+</body>
+</html>
